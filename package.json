@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "argparse": "^2.0.1",
+    "papaparse": "^5.3.2",
+    "read-gedcom": "^0.3.1"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules
+*.ged
+output
+package-lock.json
