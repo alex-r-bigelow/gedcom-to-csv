@@ -30,6 +30,11 @@ would be successfully parsed with "-d abt. -"). \
 If this option is used, date values are omitted \
 when parsing is unsuccessful`,
 });
+parser.add_argument('-p', '--parents-table', {
+  action: 'store_true',
+  help: `Generate an additional PARENTS table, \
+directly connecting children to parents`,
+});
 
 const args = parser.parse_args();
 const forceDateRegex = args['force_date_parsing']
@@ -47,10 +52,39 @@ if (!fs.existsSync(args.input)) {
   throw new Error('Input file does not exist');
 }
 
-const tables = {
-  PARENTS: { rows: [], columns: new Set(['child', 'parent']) },
+const EXTRA_TABLES = {
+  ...(args['parents_table']
+    ? { PARENTS: { rows: [], columns: new Set(['child', 'parent']) } }
+    : {}),
 };
-const promotedValueTables = {};
+const EXTRA_TABLE_PARSERS = {
+  ...(args['parents_table']
+    ? {
+        PARENTS: (record, tag, pointer, children) => {
+          const results = [];
+          if (tag === 'FAM') {
+            children.forEach((childRecord) => {
+              if (childRecord.tag === 'CHIL') {
+                if (record.WIFE) {
+                  results.push({
+                    child: childRecord.value,
+                    parent: record.WIFE,
+                  });
+                }
+                if (record.HUSB) {
+                  results.push({
+                    child: childRecord.value,
+                    parent: record.HUSB,
+                  });
+                }
+              }
+            });
+          }
+          return results;
+        },
+      }
+    : {}),
+};
 
 const linkAttributes = {
   CHIL: 'INDI',
@@ -100,7 +134,7 @@ fs.readFile(args.input, (error, buffer) => {
   }, new Set());
 
   const tables = {
-    PARENTS: { rows: [], columns: new Set(['child', 'parent']) },
+    ...EXTRA_TABLES,
   };
   const promotedValueTables = {};
 
@@ -216,24 +250,9 @@ fs.readFile(args.input, (error, buffer) => {
     });
     tables[tag].rows.push(record);
 
-    if (tag === 'FAM') {
-      children.forEach((childRecord) => {
-        if (childRecord.tag === 'CHIL') {
-          if (record.WIFE) {
-            tables['PARENTS'].rows.push({
-              child: childRecord.value,
-              parent: record.WIFE,
-            });
-          }
-          if (record.HUSB) {
-            tables['PARENTS'].rows.push({
-              child: childRecord.value,
-              parent: record.HUSB,
-            });
-          }
-        }
-      });
-    }
+    Object.entries(EXTRA_TABLE_PARSERS).forEach(([table, parser]) => {
+      tables[table].rows.push(...parser(record, tag, pointer, children));
+    });
   });
 
   if (args.csv) {
