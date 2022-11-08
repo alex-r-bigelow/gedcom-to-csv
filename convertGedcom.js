@@ -35,9 +35,14 @@ parser.add_argument('-p', '--parents-table', {
   help: `Generate an additional PARENTS table, \
 directly connecting children to parents`,
 });
+parser.add_argument('-n', '--copy_individual_names', {
+  action: 'store_true',
+  help: `Store a copy of the main NAME for each \
+INDI entry`,
+});
 
 const args = parser.parse_args();
-const forceDateRegex = args['force_date_parsing']
+const FORCE_DATE_REGEX = args['force_date_parsing']
   ? new RegExp(
       args['force_date_parsing']
         .map((delimiter) => {
@@ -86,14 +91,24 @@ const EXTRA_TABLE_PARSERS = {
     : {}),
 };
 
-const linkAttributes = {
+const LINK_ATTRIBUTES = {
   CHIL: 'INDI',
   FAMC: 'FAM',
   FAMS: 'FAM',
 };
 
-const promotedValues = {
-  INDI: new Set(['TITL']),
+const PROMOTED_VALUES = {
+  INDI: new Set([
+    'TITL',
+    'RELI',
+    '_EMPLOY',
+    'BLES',
+    '_DCAUSE',
+    'DEAT',
+    'OCCU',
+    'EDUC',
+    '_MDCL',
+  ]),
 };
 
 const formatValue = (tag, value) => {
@@ -104,7 +119,7 @@ const formatValue = (tag, value) => {
       } catch (err) {
         if (args['force_date_parsing']) {
           const numbers = value
-            .split(forceDateRegex)
+            .split(FORCE_DATE_REGEX)
             .map((maybeDate) => Number(new Date(maybeDate)))
             .filter((millis) => !isNaN(millis));
           if (numbers.length > 0) {
@@ -165,7 +180,7 @@ fs.readFile(args.input, (error, buffer) => {
       };
     }
     if (!promotedValueTables[targetTable].rows[targetValue]) {
-      const id = `@${targetTable}${
+      const id = `@gedcom-to-csv_generated_${targetTable}${
         Object.keys(promotedValueTables[targetTable].rows).length
       }@`;
       promotedValueTables[targetTable].rows[targetValue] = {
@@ -208,16 +223,16 @@ fs.readFile(args.input, (error, buffer) => {
   };
 
   const parseChild = (tag, pointer, record, childRecord) => {
-    if (linkAttributes[childRecord.tag]) {
+    if (LINK_ATTRIBUTES[childRecord.tag]) {
       addJunctionRow(
         tag,
         pointer,
-        linkAttributes[childRecord.tag],
+        LINK_ATTRIBUTES[childRecord.tag],
         childRecord.value
       );
     } else if (baseTableNames.has(childRecord.tag)) {
       addJunctionRow(tag, pointer, childRecord.tag, childRecord.value);
-    } else if (promotedValues[tag]?.has(childRecord.tag)) {
+    } else if (PROMOTED_VALUES[tag]?.has(childRecord.tag)) {
       addPromotedValue(tag, pointer, childRecord.tag, childRecord.value);
     } else if (childRecord.children?.length > 0) {
       parsePromotedRecord(tag, pointer, childRecord);
@@ -247,12 +262,30 @@ fs.readFile(args.input, (error, buffer) => {
     const record = { id: pointer };
     children.forEach((childRecord) => {
       parseChild(tag, pointer, record, childRecord);
+      if (
+        args['copy_individual_names'] &&
+        tag === 'INDI' &&
+        childRecord.tag === 'NAME'
+      ) {
+        tables.INDI.columns.add('NAME');
+        record.NAME = childRecord.value;
+      }
     });
     tables[tag].rows.push(record);
 
     Object.entries(EXTRA_TABLE_PARSERS).forEach(([table, parser]) => {
       tables[table].rows.push(...parser(record, tag, pointer, children));
     });
+  });
+
+  console.log('Integrating promoted value tables...');
+  Object.entries(promotedValueTables).forEach(([table, { rows, columns }]) => {
+    if (tables[table]) {
+      tables[table].columns.add(...columns);
+      tables[table].rows.push(...Object.values(rows));
+    } else {
+      tables[table] = { rows: Object.values(rows), columns };
+    }
   });
 
   if (args.csv) {
