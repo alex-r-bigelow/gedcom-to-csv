@@ -1,4 +1,6 @@
 node_modules
 *.ged
 output
+Charlemagne
+.DS_Store
 package-lock.json

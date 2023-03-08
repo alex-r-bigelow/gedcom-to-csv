@@ -35,10 +35,14 @@ parser.add_argument('-p', '--parents-table', {
   help: `Generate an additional PARENTS table, \
 directly connecting children to parents`,
 });
-parser.add_argument('-n', '--copy_individual_names', {
+parser.add_argument('-n', '--copy-individual-names', {
   action: 'store_true',
   help: `Store a copy of the main NAME for each \
 INDI entry`,
+});
+parser.add_argument('-u', '--keep-underscores', {
+  action: 'store_true',
+  help: `Keep leading underscores for tables like _EMPLOY`,
 });
 
 const args = parser.parse_args();
@@ -91,26 +95,6 @@ const EXTRA_TABLE_PARSERS = {
     : {}),
 };
 
-const LINK_ATTRIBUTES = {
-  CHIL: 'INDI',
-  FAMC: 'FAM',
-  FAMS: 'FAM',
-};
-
-const PROMOTED_VALUES = {
-  INDI: new Set([
-    'TITL',
-    'RELI',
-    '_EMPLOY',
-    'BLES',
-    '_DCAUSE',
-    'DEAT',
-    'OCCU',
-    'EDUC',
-    '_MDCL',
-  ]),
-};
-
 const formatValue = (tag, value) => {
   switch (tag) {
     case 'DATE':
@@ -137,6 +121,31 @@ const formatValue = (tag, value) => {
   }
 };
 
+const formatTag = (tag) =>
+  args.keep_underscores ? tag : tag.replace(/^_+/g, '');
+
+const LINK_ATTRIBUTES = {
+  CHIL: 'INDI',
+  FAMC: 'FAM',
+  FAMS: 'FAM',
+};
+
+const PROMOTED_VALUES = {
+  INDI: new Set(
+    [
+      'TITL',
+      'RELI',
+      '_EMPLOY',
+      'BLES',
+      '_DCAUSE',
+      'DEAT',
+      'OCCU',
+      'EDUC',
+      '_MDCL',
+    ].map(formatTag)
+  ),
+};
+
 fs.readFile(args.input, (error, buffer) => {
   if (error) throw error;
   const gedcom = readGedcom(buffer);
@@ -144,7 +153,7 @@ fs.readFile(args.input, (error, buffer) => {
 
   console.log('Identifying available data tables...');
   const baseTableNames = allRecords.reduce((agg, gedcomRecord) => {
-    agg.add(gedcomRecord.tag);
+    agg.add(formatTag(gedcomRecord.tag));
     return agg;
   }, new Set());
 
@@ -216,7 +225,10 @@ fs.readFile(args.input, (error, buffer) => {
       ),
     };
     promotedRecord.children?.forEach((childRecord) => {
-      parseChild(promotedRecord.tag, id, row, childRecord);
+      parseChild(promotedRecord.tag, id, row, {
+        ...childRecord,
+        tag: formatTag(childRecord.tag),
+      });
     });
 
     tables[promotedRecord.tag].rows.push(row);
@@ -255,17 +267,22 @@ fs.readFile(args.input, (error, buffer) => {
 
   console.log('Parsing records...');
   allRecords.forEach((gedcomRecord) => {
-    const { tag, pointer, children } = gedcomRecord;
+    const { tag: rawTag, pointer, children } = gedcomRecord;
+    const tag = formatTag(rawTag);
     if (!tables[tag]) {
       tables[tag] = { rows: [], columns: new Set(['id']) };
     }
     const record = { id: pointer };
     children.forEach((childRecord) => {
-      parseChild(tag, pointer, record, childRecord);
+      const childTag = formatTag(childRecord.tag);
+      parseChild(tag, pointer, record, {
+        ...childRecord,
+        tag: childTag,
+      });
       if (
         args['copy_individual_names'] &&
         tag === 'INDI' &&
-        childRecord.tag === 'NAME'
+        childTag === 'NAME'
       ) {
         tables.INDI.columns.add('NAME');
         record.NAME = childRecord.value;
